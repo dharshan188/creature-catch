@@ -1,7 +1,10 @@
 from threading import Lock, Thread
+import threading
 import os
 import time
 from datetime import datetime
+import smtplib
+from email.message import EmailMessage
 
 import cv2
 from flask import Flask, Response, jsonify, request
@@ -29,9 +32,24 @@ TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
 USER_PHONE_NUMBER = os.getenv("USER_PHONE_NUMBER")
-SERVER_URL = os.getenv("SERVER_URL", "http://localhost:5000")
+BASE_URL = os.getenv("BASE_URL")
+if BASE_URL:
+    BASE_URL = BASE_URL.rstrip("/")
+if not BASE_URL or "localhost" in BASE_URL or not BASE_URL.startswith("https://"):
+    raise ValueError("BASE_URL must be a public ngrok HTTPS URL")
+FOREST_OFFICER_NUMBER = os.getenv("FOREST_OFFICER_NUMBER")
+
+EMAIL_SENDER = os.getenv("EMAIL_SENDER")
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
+EMAIL_RECEIVER = os.getenv("EMAIL_RECEIVER")
 print("TWILIO_ACCOUNT_SID:", TWILIO_ACCOUNT_SID)
 print("USER_PHONE_NUMBER:", USER_PHONE_NUMBER)
+print("EMAIL:", EMAIL_SENDER)
+print("EMAIL_SENDER:", EMAIL_SENDER)
+print("EMAIL_PASSWORD:", EMAIL_PASSWORD)
+print("EMAIL_RECEIVER:", EMAIL_RECEIVER)
+print("FOREST:", FOREST_OFFICER_NUMBER)
+print("Using BASE_URL:", BASE_URL)
 
 ALERTS_DIR = "alerts"
 os.makedirs(ALERTS_DIR, exist_ok=True)
@@ -64,6 +82,8 @@ current_label = None
 first_seen_time = None
 last_confirmed_label = None
 last_detection_time = 0.0
+last_image_path = None
+last_label = None
 
 model = YOLO("yolov8n.pt")
 camera = cv2.VideoCapture(0, cv2.CAP_V4L2)
@@ -103,12 +123,16 @@ def make_call():
         print("Twilio error: Missing Twilio credentials")
         return False
 
+    if not BASE_URL:
+        print("Twilio error: Missing BASE_URL")
+        return False
+
     try:
         client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
         call = client.calls.create(
             to=USER_PHONE_NUMBER,
             from_=TWILIO_PHONE_NUMBER,
-            url=f"{SERVER_URL}/voice",
+            url=f"{BASE_URL}/voice",
         )
         print("📞 CALL INITIATED:", call.sid)
         return True
@@ -123,6 +147,93 @@ def delayed_call():
     make_call()
 
 
+def send_email(image_path, label):
+    try:
+        print("📧 Sending email...")
+        print("To:", EMAIL_RECEIVER)
+
+        if not EMAIL_SENDER or not EMAIL_PASSWORD or not EMAIL_RECEIVER:
+            print("❌ EMAIL ERROR: Missing EMAIL_SENDER, EMAIL_PASSWORD, or EMAIL_RECEIVER")
+            return False
+
+        if not image_path or not os.path.exists(image_path):
+            print("❌ EMAIL ERROR: Missing or invalid image_path", image_path)
+            return False
+
+        msg = EmailMessage()
+        msg["Subject"] = "🚨 Wildlife Intrusion Alert"
+        msg["From"] = EMAIL_SENDER
+        msg["To"] = EMAIL_RECEIVER
+
+        msg.set_content(f"Intrusion detected in Nelambur. Type: {label}")
+
+        with open(image_path, "rb") as image_file:
+            msg.add_attachment(
+                image_file.read(),
+                maintype="image",
+                subtype="jpeg",
+                filename="intrusion.jpg",
+            )
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+            smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
+            smtp.send_message(msg)
+
+        print("✅ Email sent successfully")
+        return True
+    except Exception as e:
+        print("❌ EMAIL ERROR:", e)
+        return False
+
+
+def call_forest_officer():
+    print("📞 Calling forest officer...")
+
+    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or not TWILIO_PHONE_NUMBER or not FOREST_OFFICER_NUMBER:
+        print("Twilio error: Missing credentials or FOREST_OFFICER_NUMBER for escalation call")
+        return False
+
+    try:
+        client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        call = client.calls.create(
+            to=FOREST_OFFICER_NUMBER,
+            from_=TWILIO_PHONE_NUMBER,
+            twiml="""
+            <Response>
+                <Say>Emergency alert. Wildlife intrusion detected in Nelambur. Immediate attention required.</Say>
+            </Response>
+            """,
+        )
+        print("✅ Forest officer call placed")
+        print("📞 FOREST OFFICER CALL SID:", call.sid)
+        return True
+    except Exception as exc:
+        print("Forest officer call error:", exc)
+        return False
+
+
+def trigger_escalation():
+    print("🚀 ESCALATION STARTED")
+    try:
+        print("Image:", last_image_path)
+        print("Label:", last_label)
+
+        if not last_image_path or not last_label:
+            print("⚠️ No detection data available")
+            return False
+
+        email_ok = send_email(last_image_path, last_label)
+        print("Email status:", email_ok)
+        call_ok = call_forest_officer()
+        print("Forest call status:", call_ok)
+
+        print("✅ Escalation complete")
+        return email_ok and call_ok
+    except Exception as e:
+        print("❌ ESCALATION ERROR:", e)
+        return False
+
+
 @app.after_request
 def add_cors_headers(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
@@ -133,6 +244,7 @@ def add_cors_headers(response):
 
 def generate_frames():
     global current_status, current_label, first_seen_time, last_confirmed_label, last_detection_time
+    global last_image_path, last_label
 
     if not camera.isOpened():
         raise RuntimeError("Cannot open camera 0")
@@ -225,6 +337,8 @@ def generate_frames():
                 if not saved:
                     print("Failed to save alert image:", filename)
                 else:
+                    last_image_path = filename
+                    last_label = mapped_label.upper()
                     print("Sending to Telegram:", filename)
                     sent_ok = send_telegram_alert(filename, mapped_label, detected_confidence)
                     if sent_ok:
@@ -262,24 +376,42 @@ def status():
 
 @app.route("/voice", methods=["GET", "POST"])
 def voice():
+    from twilio.twiml.voice_response import VoiceResponse, Gather
+
+    print("VOICE ROUTE HIT")
     response = VoiceResponse()
-    gather = Gather(num_digits=1, action="/handle-key")
-    gather.say(
-        "Intrusion detected at your location. We have sent a picture to your phone. "
-        "If the situation seems suspicious and you would like to escalate this alert, press 4."
+    gather = Gather(
+        num_digits=1,
+        action=f"{BASE_URL}/handle-key",
+        method="POST",
+        timeout=5,
     )
+    gather.say("Intrusion detected. We have sent a picture. If it seems suspicious, press 4.")
     response.append(gather)
-    print("🎙️ VOICE ROUTE CALLED - PLAYING MESSAGE")
+    response.say("Thank you. Goodbye.")
+    response.hangup()
     return str(response)
 
 
 @app.route("/handle-key", methods=["POST"])
 def handle_key():
+    from flask import request
+    from twilio.twiml.voice_response import VoiceResponse
+
     digit = request.form.get("Digits")
-    print("🎛️ USER PRESSED KEY:", digit)
+    print("HANDLE KEY HIT:", digit)
+
+    response = VoiceResponse()
     if digit == "4":
-        print("🚨 USER CONFIRMED INTRUSION - ESCALATING ALERT!")
-    return "OK"
+        response.say("Intrusion confirmed. Authorities are being notified.")
+        escalation_thread = threading.Thread(target=trigger_escalation, daemon=True)
+        escalation_thread.start()
+        print("Escalation thread started")
+    else:
+        response.say("No action taken.")
+
+    response.hangup()
+    return str(response)
 
 
 if __name__ == "__main__":
