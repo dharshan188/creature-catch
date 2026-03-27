@@ -1,3 +1,3 @@
-# Welcome to your Lovable project
+# Wildlife Intrusion
 
-TODO: Document your project here
+Real-time wildlife intrusion monitoring dashboard with a Flask + YOLOv8 backend and React frontend.

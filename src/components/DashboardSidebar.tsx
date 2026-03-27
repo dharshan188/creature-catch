@@ -52,9 +52,6 @@ export function DashboardSidebar({ activePage, onPageChange, isOpen, onToggle }:
               <p className="text-xs text-muted-foreground">Detection System</p>
             </div>
           </div>
-          <p className="text-[11px] text-muted-foreground mt-3 tracking-wide uppercase">
-            Team: Teen Titans Go
-          </p>
         </div>
 
         <div className="h-px bg-border/50 mx-4 my-2" />
@@ -91,14 +88,6 @@ export function DashboardSidebar({ activePage, onPageChange, isOpen, onToggle }:
             );
           })}
         </nav>
-
-        {/* Footer */}
-        <div className="p-4">
-          <div className="glass rounded-xl p-3 text-center">
-            <p className="text-[11px] text-muted-foreground">AI-Powered Security</p>
-            <p className="text-xs text-primary font-medium mt-0.5">v1.0.0</p>
-          </div>
-        </div>
       </aside>
     </>
   );
