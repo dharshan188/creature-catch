@@ -1,0 +1,52 @@
+[
+  {
+    "event_id": "EVT-1774631412697",
+    "timestamp": "2026-03-27 22:40:12",
+    "type": "HUMAN",
+    "confidence": 0.51,
+    "image_path": "alerts/HUMAN_20260327_224012.jpg",
+    "location": "Nelambur",
+    "telegram_sent": true,
+    "call_made": true,
+    "user_response": "Pending",
+    "email_sent": false,
+    "forest_notified": false,
+    "report_file": "reports/report_20260327_224012.pdf"
+  },
+  {
+    "event_id": "EVT-1774631593344",
+    "timestamp": "2026-03-27 22:43:13",
+    "type": "HUMAN",
+    "confidence": 0.6,
+    "image_path": "alerts/HUMAN_20260327_224313.jpg",
+    "location": "Nelambur",
+    "telegram_sent": true,
+    "call_made": true,
+    "user_response": "Confirmed",
+    "email_sent": true,
+    "forest_notified": true,
+    "report_file": "reports/report_20260327_224313.pdf"
+  },
+  {
+    "event_id": "EVT-1774631964402",
+    "timestamp": "2026-03-27 22:49:24",
+    "type": "HUMAN",
+    "confidence": 0.56,
+    "image_path": "alerts/HUMAN_20260327_224924.jpg",
+    "location": "Nelambur",
+    "telegram_sent": true,
+    "call_made": true,
+    "user_response": "Confirmed",
+    "email_sent": true,
+    "forest_notified": true,
+    "timeline": {
+      "detected": "2026-03-27 22:49:24",
+      "telegram": "2026-03-27 22:49:28",
+      "call": "2026-03-27 22:49:39",
+      "user_response": "2026-03-27 22:50:06",
+      "email": "2026-03-27 22:50:13",
+      "forest": "2026-03-27 22:50:14"
+    },
+    "report_file": "reports/report_2026-03-27_22-49-24.pdf"
+  }
+]

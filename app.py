@@ -2,12 +2,14 @@ from threading import Lock, Thread
 import threading
 import os
 import time
+import json
+import csv
 from datetime import datetime
 import smtplib
 from email.message import EmailMessage
 
 import cv2
-from flask import Flask, Response, jsonify, request
+from flask import Flask, Response, abort, jsonify, request, send_file
 import requests
 from dotenv import load_dotenv
 
@@ -15,9 +17,13 @@ try:
     from ultralytics import YOLO
     from twilio.rest import Client
     from twilio.twiml.voice_response import VoiceResponse, Gather
+    from reportlab.lib.pagesizes import letter
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import inch
 except ImportError as exc:
     raise ImportError(
-        "Install dependencies with: pip install flask ultralytics opencv-python python-dotenv requests twilio"
+        "Install dependencies with: pip install flask ultralytics opencv-python python-dotenv requests twilio reportlab"
     ) from exc
 
 
@@ -53,6 +59,10 @@ print("Using BASE_URL:", BASE_URL)
 
 ALERTS_DIR = "alerts"
 os.makedirs(ALERTS_DIR, exist_ok=True)
+REPORTS_DIR = "reports"
+EVENTS_JSON_PATH = os.path.join(REPORTS_DIR, "events.json")
+EVENTS_CSV_PATH = os.path.join(REPORTS_DIR, "events.csv")
+LOCATION_NAME = "Nelambur"
 STABLE_DETECTION_SECONDS = 3
 NO_DETECTION_RESET_SECONDS = 2
 MODEL_INPUT_SIZE = (640, 480)
@@ -78,17 +88,308 @@ current_status = "Nothing Detected"
 status_lock = Lock()
 alert_lock = Lock()
 tracking_lock = Lock()
+reports_lock = Lock()
 current_label = None
 first_seen_time = None
 last_confirmed_label = None
 last_detection_time = 0.0
 last_image_path = None
 last_label = None
+last_event_id = None
 
 model = YOLO("yolov8n.pt")
 camera = cv2.VideoCapture(0, cv2.CAP_V4L2)
 camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
 camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+
+def ensure_report_storage():
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+
+    if not os.path.exists(EVENTS_JSON_PATH):
+        try:
+            with open(EVENTS_JSON_PATH, "w", encoding="utf-8") as events_file:
+                json.dump([], events_file, indent=2)
+        except OSError as exc:
+            print("Report storage error:", exc)
+
+
+def write_events_csv(events):
+    csv_headers = [
+        "event_id",
+        "timestamp",
+        "type",
+        "confidence",
+        "image_path",
+        "location",
+        "telegram_sent",
+        "call_made",
+        "user_response",
+        "email_sent",
+        "forest_notified",
+        "report_file",
+    ]
+
+    try:
+        with open(EVENTS_CSV_PATH, "w", newline="", encoding="utf-8") as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=csv_headers)
+            writer.writeheader()
+            for event in events:
+                writer.writerow({key: event.get(key, "") for key in csv_headers})
+    except OSError as exc:
+        print("CSV write error:", exc)
+
+
+def load_events():
+    ensure_report_storage()
+    with reports_lock:
+        try:
+            with open(EVENTS_JSON_PATH, "r", encoding="utf-8") as events_file:
+                events = json.load(events_file)
+            if isinstance(events, list):
+                return events
+            print("Report data warning: events.json did not contain a list. Resetting.")
+            return []
+        except (OSError, json.JSONDecodeError) as exc:
+            print("Report load error:", exc)
+            return []
+
+
+def current_time_string():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def generate_report(event):
+    timestamp_text = event.get("timestamp", current_time_string())
+    filename = event.get("report_file")
+    if not filename:
+        safe_stamp = str(timestamp_text).replace(":", "-").replace(" ", "_")
+        filename = os.path.join(REPORTS_DIR, f"report_{safe_stamp}.pdf")
+
+    doc = SimpleDocTemplate(filename, pagesize=letter)
+    styles = getSampleStyleSheet()
+    content = []
+
+    content.append(Paragraph("WILDLIFE INTRUSION REPORT", styles["Title"]))
+    content.append(Spacer(1, 12))
+
+    content.append(Paragraph(f"Location: {event.get('location', LOCATION_NAME)}", styles["Normal"]))
+    content.append(Paragraph(f"Date & Time: {timestamp_text}", styles["Normal"]))
+    content.append(Spacer(1, 10))
+
+    content.append(Paragraph("Detection Details:", styles["Heading2"]))
+    content.append(Paragraph(f"Type: {event.get('type', 'UNKNOWN')}", styles["Normal"]))
+    content.append(Paragraph(f"Confidence: {event.get('confidence', 0.0)}", styles["Normal"]))
+    content.append(Spacer(1, 10))
+
+    try:
+        content.append(Paragraph("Image Evidence:", styles["Heading2"]))
+        img = Image(event.get("image_path", ""), width=4 * inch, height=3 * inch)
+        content.append(img)
+    except Exception:
+        content.append(Paragraph("Image not available", styles["Normal"]))
+
+    content.append(Spacer(1, 12))
+
+    content.append(Paragraph("Timeline of Events:", styles["Heading2"]))
+    timeline = event.get("timeline", {}) or {}
+    for key, value in timeline.items():
+        timestamp_value = value if value else "Not recorded"
+        content.append(Paragraph(f"{timestamp_value} → {key}", styles["Normal"]))
+
+    content.append(Spacer(1, 12))
+    content.append(Paragraph("Summary:", styles["Heading2"]))
+
+    authority_status = "Authorities were notified successfully." if event.get("forest_notified") else "Authorities notification is pending."
+    summary_text = (
+        f"Intrusion of type {event.get('type', 'UNKNOWN')} was detected and processed.<br/>"
+        f"User response: {event.get('user_response', 'Pending')}.<br/>"
+        f"{authority_status}"
+    )
+    content.append(Paragraph(summary_text, styles["Normal"]))
+
+    doc.build(content)
+    print("📄 Advanced PDF generated:", filename)
+    return filename
+
+
+def write_report_file(event):
+    ensure_report_storage()
+    report_path = event.get("report_file")
+    if not report_path:
+        event_timestamp = event.get("timestamp", current_time_string())
+        safe_timestamp = str(event_timestamp).replace(":", "-").replace(" ", "_")
+        report_path = os.path.join(REPORTS_DIR, f"report_{safe_timestamp}.pdf")
+        event["report_file"] = report_path
+
+    try:
+        generated_path = generate_report(event)
+        print("📄 Report generated:", generated_path)
+        return generated_path
+    except Exception as exc:
+        print("Report write error:", exc)
+        return None
+
+
+def save_event(event_data):
+    ensure_report_storage()
+
+    event = {
+        "event_id": event_data.get("event_id") or f"EVT-{int(time.time() * 1000)}",
+        "timestamp": event_data.get("timestamp", current_time_string()),
+        "type": event_data.get("type", "UNKNOWN"),
+        "confidence": event_data.get("confidence", 0.0),
+        "image_path": event_data.get("image_path", ""),
+        "location": event_data.get("location", LOCATION_NAME),
+        "telegram_sent": bool(event_data.get("telegram_sent", False)),
+        "call_made": bool(event_data.get("call_made", False)),
+        "user_response": event_data.get("user_response", "Pending"),
+        "email_sent": bool(event_data.get("email_sent", False)),
+        "forest_notified": bool(event_data.get("forest_notified", False)),
+        "timeline": event_data.get("timeline")
+        or {
+            "detected": event_data.get("timestamp", current_time_string()),
+            "telegram": "",
+            "call": "",
+            "user_response": "",
+            "email": "",
+            "forest": "",
+        },
+        "report_file": event_data.get("report_file"),
+    }
+
+    with reports_lock:
+        events = []
+        try:
+            with open(EVENTS_JSON_PATH, "r", encoding="utf-8") as events_file:
+                loaded_events = json.load(events_file)
+                if isinstance(loaded_events, list):
+                    events = loaded_events
+        except (OSError, json.JSONDecodeError):
+            events = []
+
+        if not event.get("report_file"):
+            event_timestamp = event.get("timestamp", current_time_string())
+            safe_timestamp = str(event_timestamp).replace(":", "-").replace(" ", "_")
+            event["report_file"] = os.path.join(REPORTS_DIR, f"report_{safe_timestamp}.pdf")
+
+        events.append(event)
+
+        try:
+            with open(EVENTS_JSON_PATH, "w", encoding="utf-8") as events_file:
+                json.dump(events, events_file, indent=2)
+        except OSError as exc:
+            print("Event save error:", exc)
+            return None
+
+        write_events_csv(events)
+
+    write_report_file(event)
+    print("📄 Event logged")
+    return event
+
+
+def update_event(event_id, field, value):
+    if not event_id:
+        return False
+
+    ensure_report_storage()
+    updated_event = None
+
+    with reports_lock:
+        try:
+            with open(EVENTS_JSON_PATH, "r", encoding="utf-8") as events_file:
+                events = json.load(events_file)
+                if not isinstance(events, list):
+                    events = []
+        except (OSError, json.JSONDecodeError):
+            events = []
+
+        for event in events:
+            if event.get("event_id") == event_id:
+                event[field] = value
+                updated_event = event
+                break
+
+        if updated_event is None:
+            return False
+
+        try:
+            with open(EVENTS_JSON_PATH, "w", encoding="utf-8") as events_file:
+                json.dump(events, events_file, indent=2)
+        except OSError as exc:
+            print("Event update error:", exc)
+            return False
+
+        write_events_csv(events)
+
+    write_report_file(updated_event)
+    return True
+
+
+def update_event_timeline(event_id, timeline_field, timestamp_value=None):
+    if not event_id:
+        return False
+
+    ensure_report_storage()
+    updated_event = None
+
+    with reports_lock:
+        try:
+            with open(EVENTS_JSON_PATH, "r", encoding="utf-8") as events_file:
+                events = json.load(events_file)
+                if not isinstance(events, list):
+                    events = []
+        except (OSError, json.JSONDecodeError):
+            events = []
+
+        for event in events:
+            if event.get("event_id") == event_id:
+                timeline = event.get("timeline") or {}
+                timeline[timeline_field] = timestamp_value or current_time_string()
+                event["timeline"] = timeline
+                updated_event = event
+                break
+
+        if updated_event is None:
+            return False
+
+        try:
+            with open(EVENTS_JSON_PATH, "w", encoding="utf-8") as events_file:
+                json.dump(events, events_file, indent=2)
+        except OSError as exc:
+            print("Timeline update error:", exc)
+            return False
+
+        write_events_csv(events)
+
+    write_report_file(updated_event)
+    return True
+
+
+def find_latest_pending_event_id():
+    events = load_events()
+    for event in reversed(events):
+        if event.get("user_response") == "Pending":
+            return event.get("event_id")
+    return None
+
+
+def build_public_url(path, event_id=None):
+    base_url = BASE_URL or ""
+    if base_url:
+        full_url = f"{base_url.rstrip('/')}{path}"
+    else:
+        full_url = path
+
+    if event_id:
+        separator = "&" if "?" in full_url else "?"
+        full_url = f"{full_url}{separator}event_id={event_id}"
+
+    return full_url
+
+
+ensure_report_storage()
 
 
 def send_telegram_alert(image_path, label, conf):
@@ -118,36 +419,41 @@ def send_telegram_alert(image_path, label, conf):
         return False
 
 
-def make_call():
+def make_call(event_id=None):
     if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or not TWILIO_PHONE_NUMBER or not USER_PHONE_NUMBER:
         print("Twilio error: Missing Twilio credentials")
         return False
 
-    if not BASE_URL:
-        print("Twilio error: Missing BASE_URL")
-        return False
-
     try:
         client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        if not BASE_URL:
+            print("Twilio error: Missing BASE_URL")
+            return False
+
+        voice_url = build_public_url("/voice", event_id)
         call = client.calls.create(
             to=USER_PHONE_NUMBER,
             from_=TWILIO_PHONE_NUMBER,
-            url=f"{BASE_URL}/voice",
+            url=voice_url,
+            method="GET",
         )
         print("📞 CALL INITIATED:", call.sid)
+        if event_id:
+            update_event(event_id, "call_made", True)
+            update_event_timeline(event_id, "call", current_time_string())
         return True
     except Exception as exc:
         print("Twilio error:", exc)
         return False
 
 
-def delayed_call():
+def delayed_call(event_id=None):
     time.sleep(10)
     print("⏰ INITIATING VOICE CALL AFTER 10 SECONDS")
-    make_call()
+    make_call(event_id)
 
 
-def send_email(image_path, label):
+def send_email(image_path, label, event_id=None):
     try:
         print("📧 Sending email...")
         print("To:", EMAIL_RECEIVER)
@@ -180,13 +486,16 @@ def send_email(image_path, label):
             smtp.send_message(msg)
 
         print("✅ Email sent successfully")
+        if event_id:
+            update_event(event_id, "email_sent", True)
+            update_event_timeline(event_id, "email", current_time_string())
         return True
     except Exception as e:
         print("❌ EMAIL ERROR:", e)
         return False
 
 
-def call_forest_officer():
+def call_forest_officer(event_id=None):
     print("📞 Calling forest officer...")
 
     if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or not TWILIO_PHONE_NUMBER or not FOREST_OFFICER_NUMBER:
@@ -206,25 +515,30 @@ def call_forest_officer():
         )
         print("✅ Forest officer call placed")
         print("📞 FOREST OFFICER CALL SID:", call.sid)
+        if event_id:
+            update_event(event_id, "forest_notified", True)
+            update_event_timeline(event_id, "forest", current_time_string())
         return True
     except Exception as exc:
         print("Forest officer call error:", exc)
         return False
 
 
-def trigger_escalation():
+def trigger_escalation(event_id=None):
     print("🚀 ESCALATION STARTED")
     try:
         print("Image:", last_image_path)
         print("Label:", last_label)
 
+        target_event_id = event_id or last_event_id
+
         if not last_image_path or not last_label:
             print("⚠️ No detection data available")
             return False
 
-        email_ok = send_email(last_image_path, last_label)
+        email_ok = send_email(last_image_path, last_label, target_event_id)
         print("Email status:", email_ok)
-        call_ok = call_forest_officer()
+        call_ok = call_forest_officer(target_event_id)
         print("Forest call status:", call_ok)
 
         print("✅ Escalation complete")
@@ -244,7 +558,7 @@ def add_cors_headers(response):
 
 def generate_frames():
     global current_status, current_label, first_seen_time, last_confirmed_label, last_detection_time
-    global last_image_path, last_label
+    global last_image_path, last_label, last_event_id
 
     if not camera.isOpened():
         raise RuntimeError("Cannot open camera 0")
@@ -339,13 +653,40 @@ def generate_frames():
                 else:
                     last_image_path = filename
                     last_label = mapped_label.upper()
+                    event_record = save_event(
+                        {
+                            "timestamp": current_time_string(),
+                            "type": mapped_label.upper(),
+                            "confidence": round(float(detected_confidence), 2),
+                            "image_path": filename,
+                            "location": LOCATION_NAME,
+                            "telegram_sent": False,
+                            "call_made": False,
+                            "user_response": "Pending",
+                            "email_sent": False,
+                            "forest_notified": False,
+                            "timeline": {
+                                "detected": current_time_string(),
+                                "telegram": "",
+                                "call": "",
+                                "user_response": "",
+                                "email": "",
+                                "forest": "",
+                            },
+                        }
+                    )
+                    event_id = event_record.get("event_id") if event_record else None
+                    last_event_id = event_id
                     print("Sending to Telegram:", filename)
                     sent_ok = send_telegram_alert(filename, mapped_label, detected_confidence)
+                    if sent_ok and event_id:
+                        update_event(event_id, "telegram_sent", True)
+                        update_event_timeline(event_id, "telegram", current_time_string())
                     if sent_ok:
                         with alert_lock:
                             last_confirmed_label = candidate_alert_label
                         print("📞 SPAWNING DELAYED CALL THREAD")
-                        call_thread = Thread(target=delayed_call, daemon=True)
+                        call_thread = Thread(target=delayed_call, args=(event_id,), daemon=True)
                         call_thread.start()
             except Exception as exc:
                 print("Alert processing failed:", exc)
@@ -374,22 +715,79 @@ def status():
         return jsonify({"status": current_status})
 
 
+@app.route("/reports", methods=["GET"])
+def get_reports():
+    events = load_events()
+    report_items = []
+
+    for event in events:
+        report_path = event.get("report_file")
+        if not report_path:
+            continue
+
+        report_items.append(
+            {
+                "timestamp": event.get("timestamp"),
+                "type": event.get("type"),
+                "confidence": float(event.get("confidence", 0.0)),
+                "user_response": event.get("user_response", "Pending"),
+                "report_path": report_path,
+            }
+        )
+
+    return jsonify(report_items)
+
+
+@app.route("/download/<path:report_path>", methods=["GET"])
+def download_report(report_path):
+    normalized_path = os.path.normpath(report_path).lstrip(os.sep)
+    full_path = os.path.abspath(os.path.join(os.getcwd(), normalized_path))
+    reports_root = os.path.abspath(REPORTS_DIR)
+
+    if not full_path.startswith(reports_root + os.sep):
+        abort(403, description="Forbidden report path")
+
+    if not os.path.exists(full_path):
+        abort(404, description="Report not found")
+
+    return send_file(
+        full_path,
+        as_attachment=True,
+        download_name=os.path.basename(full_path),
+        mimetype="application/pdf",
+    )
+
+
 @app.route("/voice", methods=["GET", "POST"])
 def voice():
     from twilio.twiml.voice_response import VoiceResponse, Gather
 
     print("VOICE ROUTE HIT")
+    event_id = request.args.get("event_id")
+    action_url = build_public_url("/handle-key", event_id)
+
     response = VoiceResponse()
-    gather = Gather(
-        num_digits=1,
-        action=f"{BASE_URL}/handle-key",
-        method="POST",
-        timeout=5,
-    )
-    gather.say("Intrusion detected. We have sent a picture. If it seems suspicious, press 4.")
-    response.append(gather)
-    response.say("Thank you. Goodbye.")
-    response.hangup()
+    try:
+        gather = Gather(
+            input="dtmf",
+            num_digits=1,
+            action=action_url,
+            method="POST",
+            timeout=7,
+        )
+        gather.say(
+            "Intrusion detected. We have sent a picture. If it seems suspicious, press 4.",
+            voice="alice",
+            language="en-US",
+        )
+        response.append(gather)
+        response.say("No input received. Goodbye.", voice="alice", language="en-US")
+        response.hangup()
+    except Exception as exc:
+        print("Voice route error:", exc)
+        response.say("System is temporarily unavailable. Goodbye.", voice="alice", language="en-US")
+        response.hangup()
+
     return str(response)
 
 
@@ -398,17 +796,32 @@ def handle_key():
     from flask import request
     from twilio.twiml.voice_response import VoiceResponse
 
+    event_id = request.args.get("event_id") or find_latest_pending_event_id()
     digit = request.form.get("Digits")
     print("HANDLE KEY HIT:", digit)
 
     response = VoiceResponse()
-    if digit == "4":
-        response.say("Intrusion confirmed. Authorities are being notified.")
-        escalation_thread = threading.Thread(target=trigger_escalation, daemon=True)
-        escalation_thread.start()
-        print("Escalation thread started")
-    else:
-        response.say("No action taken.")
+    try:
+        if digit == "4":
+            if event_id:
+                update_event(event_id, "user_response", "Confirmed")
+                update_event_timeline(event_id, "user_response", current_time_string())
+            response.say(
+                "Intrusion confirmed. Authorities are being notified.",
+                voice="alice",
+                language="en-US",
+            )
+            escalation_thread = threading.Thread(target=trigger_escalation, args=(event_id,), daemon=True)
+            escalation_thread.start()
+            print("Escalation thread started")
+        else:
+            if event_id:
+                update_event(event_id, "user_response", "Ignored")
+                update_event_timeline(event_id, "user_response", current_time_string())
+            response.say("No action taken.", voice="alice", language="en-US")
+    except Exception as exc:
+        print("Handle-key route error:", exc)
+        response.say("Could not process your input. Goodbye.", voice="alice", language="en-US")
 
     response.hangup()
     return str(response)

@@ -1,7 +1,27 @@
 import { motion } from "framer-motion";
-import { FileText, Clock } from "lucide-react";
+import { useEffect, useState } from "react";
+
+type ReportItem = {
+  timestamp: string;
+  type: string;
+  confidence: number;
+  user_response: string;
+  report_path: string;
+};
 
 export function ReportsPage() {
+  const [reports, setReports] = useState<ReportItem[]>([]);
+
+  useEffect(() => {
+    fetch("http://127.0.0.1:5000/reports")
+      .then((res) => res.json())
+      .then((data: ReportItem[]) => {
+        const sorted = [...data].reverse();
+        setReports(sorted);
+      })
+      .catch((err) => console.error("Fetch error:", err));
+  }, []);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -14,18 +34,37 @@ export function ReportsPage() {
         <p className="text-sm text-muted-foreground mt-1">View historical intrusion events</p>
       </div>
 
-      <div className="glass rounded-2xl p-12 flex flex-col items-center justify-center text-center min-h-[400px]">
-        <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
-          <FileText className="text-primary" size={28} />
-        </div>
-        <h3 className="text-lg font-semibold text-foreground">Reports Coming Soon</h3>
-        <p className="text-sm text-muted-foreground mt-2 max-w-sm">
-          Detection logs and event reports will be displayed here once connected to the /status API endpoint.
-        </p>
-        <div className="flex items-center gap-2 mt-6 text-xs text-muted-foreground glass rounded-lg px-4 py-2">
-          <Clock size={14} />
-          <span>Feature in development</span>
-        </div>
+      <div className="reports-container">
+        {reports.length === 0 ? (
+          <p className="no-reports">No reports available yet</p>
+        ) : (
+          reports.map((report, index) => (
+            <div key={index} className="report-card">
+              <div className="report-header">
+                <h3>{report.type}</h3>
+                <span className={`status ${report.user_response === "Confirmed" ? "confirmed" : "pending"}`}>
+                  {report.user_response}
+                </span>
+              </div>
+
+              <p>
+                <strong>Time:</strong> {report.timestamp}
+              </p>
+              <p>
+                <strong>Confidence:</strong> {(Number(report.confidence) * 100).toFixed(1)}%
+              </p>
+
+              <a
+                href={`http://127.0.0.1:5000/download/${report.report_path}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="download-btn"
+              >
+                📄 Download PDF
+              </a>
+            </div>
+          ))
+        )}
       </div>
     </motion.div>
   );

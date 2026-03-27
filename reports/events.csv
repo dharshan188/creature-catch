@@ -1,0 +1,4 @@
+event_id,timestamp,type,confidence,image_path,location,telegram_sent,call_made,user_response,email_sent,forest_notified,report_file
+EVT-1774631412697,2026-03-27 22:40:12,HUMAN,0.51,alerts/HUMAN_20260327_224012.jpg,Nelambur,True,True,Pending,False,False,reports/report_20260327_224012.pdf
+EVT-1774631593344,2026-03-27 22:43:13,HUMAN,0.6,alerts/HUMAN_20260327_224313.jpg,Nelambur,True,True,Confirmed,True,True,reports/report_20260327_224313.pdf
+EVT-1774631964402,2026-03-27 22:49:24,HUMAN,0.56,alerts/HUMAN_20260327_224924.jpg,Nelambur,True,True,Confirmed,True,True,reports/report_2026-03-27_22-49-24.pdf

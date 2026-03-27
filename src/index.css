@@ -130,3 +130,66 @@
   background-size: 200% 200%;
   animation: gradient-shift 8s ease infinite;
 }
+
+.reports-container {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.report-card {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px;
+  padding: 18px;
+  box-shadow: 0 0 12px hsl(var(--background) / 0.4);
+  transition: transform 0.2s ease;
+  text-align: left;
+}
+
+.report-card:hover {
+  transform: scale(1.02);
+}
+
+.report-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.status {
+  padding: 5px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.status.confirmed {
+  background: hsl(var(--status-safe));
+  color: hsl(var(--primary-foreground));
+}
+
+.status.pending {
+  background: hsl(var(--status-elephant));
+  color: hsl(var(--primary-foreground));
+}
+
+.download-btn {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-radius: 8px;
+  text-decoration: none;
+}
+
+.download-btn:hover {
+  filter: brightness(0.9);
+}
+
+.no-reports {
+  text-align: center;
+  color: hsl(var(--muted-foreground));
+}
