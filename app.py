@@ -12,6 +12,10 @@ import cv2
 from flask import Flask, Response, abort, jsonify, request, send_file
 import requests
 from dotenv import load_dotenv
+from news_fetcher import fetch_news
+import xml.etree.ElementTree as ET
+from urllib.parse import quote_plus
+from urllib.request import urlopen
 
 try:
     from ultralytics import YOLO
@@ -62,7 +66,11 @@ os.makedirs(ALERTS_DIR, exist_ok=True)
 REPORTS_DIR = "reports"
 EVENTS_JSON_PATH = os.path.join(REPORTS_DIR, "events.json")
 EVENTS_CSV_PATH = os.path.join(REPORTS_DIR, "events.csv")
+DATA_DIR = "data"
+NEWS_JSON_PATH = os.path.join(DATA_DIR, "news.json")
+NEWS_CONFIG_PATH = os.path.join(DATA_DIR, "news_config.json")
 LOCATION_NAME = "Nelambur"
+DEFAULT_NEWS_CITY = os.getenv("NEWS_CITY", LOCATION_NAME)
 STABLE_DETECTION_SECONDS = 3
 NO_DETECTION_RESET_SECONDS = 2
 MODEL_INPUT_SIZE = (640, 480)
@@ -89,6 +97,10 @@ status_lock = Lock()
 alert_lock = Lock()
 tracking_lock = Lock()
 reports_lock = Lock()
+news_lock = Lock()
+news_refresh_lock = Lock()
+news_refreshing_cities = set()
+sent_alert_titles = set()
 current_label = None
 first_seen_time = None
 last_confirmed_label = None
@@ -112,6 +124,145 @@ def ensure_report_storage():
                 json.dump([], events_file, indent=2)
         except OSError as exc:
             print("Report storage error:", exc)
+
+
+def ensure_news_storage():
+    os.makedirs(DATA_DIR, exist_ok=True)
+
+    if not os.path.exists(NEWS_JSON_PATH):
+        try:
+            with open(NEWS_JSON_PATH, "w", encoding="utf-8") as news_file:
+                json.dump([], news_file, indent=2)
+        except OSError as exc:
+            print("News storage error:", exc)
+
+    if not os.path.exists(NEWS_CONFIG_PATH):
+        try:
+            with open(NEWS_CONFIG_PATH, "w", encoding="utf-8") as config_file:
+                json.dump({"city": DEFAULT_NEWS_CITY}, config_file, indent=2)
+        except OSError as exc:
+            print("News config storage error:", exc)
+
+
+def fetch_intrusion_news(city: str) -> list[dict[str, str]]:
+    """
+    Fetch intrusion-related news from Google News RSS with strict filtering.
+    Apply multi-level keyword filters to remove noise and keep only real intrusion events.
+    """
+    city_clean = (city or "").strip()
+    if not city_clean:
+        return []
+
+    animal_keywords = ["elephant", "leopard", "tiger"]
+    strong_action_keywords = ["spotted", "roaming", "entered", "strayed", "seen"]
+    place_keywords = ["village", "road", "area", "near"]
+    medium_action_keywords = ["attack", "injured", "killed", "enters", "menace"]
+
+    # Negative context keywords (remove articles with any of these)
+    negative_context = [
+        "election", "boycott", "policy", "scheme", "analysis", "report", "victim", "compensation"
+    ]
+
+    query = f"{city_clean} wildlife OR elephant OR leopard OR tiger OR intrusion"
+    rss_url = f"https://news.google.com/rss/search?q={quote_plus(query)}&hl=en-IN&gl=IN&ceid=IN:en"
+
+    strong = []
+    medium = []
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    try:
+        response = urlopen(rss_url, timeout=5)
+        rss_data = response.read()
+        root = ET.fromstring(rss_data)
+
+        for item in root.findall(".//item")[:15]:
+            title_elem = item.find("title")
+            link_elem = item.find("link")
+            title = title_elem.text if title_elem is not None else ""
+            link = link_elem.text if link_elem is not None else ""
+
+            if not title or not link:
+                continue
+
+            t = title.lower()
+
+            # ❌ Reject: Negative context (political, generic, etc.)
+            if any(word in t for word in negative_context):
+                continue
+
+            # ✅ Strong intrusion detection: animal + action + place
+            has_animal = any(animal in t for animal in animal_keywords)
+            has_action = any(action in t for action in strong_action_keywords)
+            has_place = any(place in t for place in place_keywords)
+
+            if has_animal and has_action and has_place:
+                strong.append(
+                    {
+                        "title": title,
+                        "link": link,
+                        "city": city_clean,
+                        "time": now,
+                    }
+                )
+                continue
+
+            # ✅ Medium intrusion detection: incident terms + place context, excluding opinion/debate noise
+            if (
+                has_animal
+                and any(k in t for k in medium_action_keywords)
+                and any(context in t for context in [
+                    "village", "area", "near", "forest", "district", "campus"
+                ])
+                and not any(bad in t for bad in [
+                    "call to", "demand", "discussion", "debate", "rename", "nickname"
+                ])
+            ):
+                medium.append(
+                    {
+                        "title": title,
+                        "link": link,
+                        "city": city_clean,
+                        "time": now,
+                    }
+                )
+
+    except Exception as exc:
+        print(f"❌ RSS fetch error for {city_clean}: {exc}")
+
+    alerts = strong[:3] if strong else medium[:3]
+    print(f"📰 Filtered intrusion alerts for {city_clean}: {len(alerts)} found")
+
+    return alerts
+
+
+def send_telegram_intrusion_alert(alert: dict[str, str]) -> bool:
+    """
+    Send intrusion alert via Telegram.
+    """
+    if not BOT_TOKEN or not CHAT_ID:
+        print("Telegram error: Missing BOT_TOKEN or CHAT_ID")
+        return False
+
+    title = alert.get("title", "Unknown Alert")
+    city = alert.get("city", "Unknown Location")
+    link = alert.get("link", "#")
+
+    message = f"""🚨 Intrusion Alert!
+📍 Location: {city}
+📰 {title}
+🔗 {link}"""
+
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": CHAT_ID, "text": message}
+
+    try:
+        response = requests.post(url, json=payload, timeout=5)
+        response.raise_for_status()
+        print(f"✅ Telegram alert sent for {city}")
+        return True
+    except Exception as exc:
+        print(f"❌ Telegram error: {exc}")
+        return False
 
 
 def write_events_csv(events):
@@ -153,6 +304,102 @@ def load_events():
         except (OSError, json.JSONDecodeError) as exc:
             print("Report load error:", exc)
             return []
+
+
+def load_news_city():
+    ensure_news_storage()
+    with news_lock:
+        try:
+            with open(NEWS_CONFIG_PATH, "r", encoding="utf-8") as config_file:
+                config = json.load(config_file)
+            if isinstance(config, dict) and config.get("city"):
+                return str(config.get("city"))
+        except (OSError, json.JSONDecodeError):
+            pass
+    return DEFAULT_NEWS_CITY
+
+
+def save_news_city(city):
+    city_name = (city or "").strip()
+    if not city_name:
+        return False
+
+    ensure_news_storage()
+    with news_lock:
+        try:
+            with open(NEWS_CONFIG_PATH, "w", encoding="utf-8") as config_file:
+                json.dump({"city": city_name}, config_file, indent=2)
+            return True
+        except OSError as exc:
+            print("News config save error:", exc)
+            return False
+
+
+def load_news(city=None):
+    ensure_news_storage()
+    target_city = (city or "").strip().lower()
+
+    with news_lock:
+        try:
+            with open(NEWS_JSON_PATH, "r", encoding="utf-8") as news_file:
+                records = json.load(news_file)
+        except (OSError, json.JSONDecodeError) as exc:
+            print("News load error:", exc)
+            records = []
+
+    if not isinstance(records, list):
+        return []
+
+    if not target_city:
+        return records
+
+    return [record for record in records if str(record.get("city", "")).strip().lower() == target_city]
+
+
+def save_news(article):
+    ensure_news_storage()
+    if not isinstance(article, dict):
+        return False
+
+    normalized_article = {
+        "city": str(article.get("city", "")).strip(),
+        "title": str(article.get("title", "")).strip(),
+        "link": str(article.get("link", "")).strip(),
+        "time": str(article.get("time", current_time_string())).strip(),
+        "published_time": str(article.get("published_time", "")).strip(),
+    }
+
+    if not normalized_article["city"] or not normalized_article["title"] or not normalized_article["link"]:
+        return False
+
+    with news_lock:
+        try:
+            with open(NEWS_JSON_PATH, "r", encoding="utf-8") as news_file:
+                records = json.load(news_file)
+                if not isinstance(records, list):
+                    records = []
+        except (OSError, json.JSONDecodeError):
+            records = []
+
+        exists = any(
+            str(item.get("link", "")).strip() == normalized_article["link"]
+            and str(item.get("city", "")).strip().lower() == normalized_article["city"].lower()
+            for item in records
+            if isinstance(item, dict)
+        )
+        if exists:
+            return False
+
+        records.append(normalized_article)
+        records.sort(key=lambda item: item.get("time", ""), reverse=True)
+
+        try:
+            with open(NEWS_JSON_PATH, "w", encoding="utf-8") as news_file:
+                json.dump(records, news_file, indent=2)
+            return True
+        except OSError as exc:
+            print("News save error:", exc)
+            return False
 
 
 def current_time_string():
@@ -390,6 +637,7 @@ def build_public_url(path, event_id=None):
 
 
 ensure_report_storage()
+ensure_news_storage()
 
 
 def send_telegram_alert(image_path, label, conf):
@@ -495,6 +743,96 @@ def send_email(image_path, label, event_id=None):
         return False
 
 
+def send_email_simple(subject, body):
+    if not EMAIL_SENDER or not EMAIL_PASSWORD or not EMAIL_RECEIVER:
+        print("❌ EMAIL ERROR: Missing EMAIL_SENDER, EMAIL_PASSWORD, or EMAIL_RECEIVER")
+        return False
+
+    try:
+        msg = EmailMessage()
+        msg["Subject"] = subject
+        msg["From"] = EMAIL_SENDER
+        msg["To"] = EMAIL_RECEIVER
+        msg.set_content(body)
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+            smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
+            smtp.send_message(msg)
+
+        print("✅ Plain email sent successfully")
+        return True
+    except Exception as exc:
+        print("❌ PLAIN EMAIL ERROR:", exc)
+        return False
+
+
+def send_news_email(article):
+    subject = "⚠️ Nearby Intrusion Alert"
+    body = f"""
+News Alert Detected!
+
+Title: {article.get('title', 'Unknown')}
+Location: {article.get('city', DEFAULT_NEWS_CITY)}
+Link: {article.get('link', '')}
+
+Check immediately.
+"""
+    return send_email_simple(subject, body)
+
+
+def fetch_and_store_news(city):
+    city_name = (city or "").strip()
+    if not city_name:
+        return []
+
+    try:
+        articles = fetch_news(city_name)
+    except Exception as exc:
+        print("News fetch error:", exc)
+        return []
+
+    newly_saved = []
+    for article in articles:
+        if save_news(article):
+            newly_saved.append(article)
+            send_news_email(article)
+
+    return newly_saved
+
+
+def news_scheduler():
+    while True:
+        try:
+            city_name = load_news_city()
+            print(f"📰 Checking news for {city_name}...")
+            fetch_and_store_news(city_name)
+        except Exception as exc:
+            print("News scheduler error:", exc)
+
+        time.sleep(86400)
+
+
+def trigger_news_refresh(city):
+    city_name = (city or "").strip()
+    if not city_name:
+        return False
+
+    with news_refresh_lock:
+        if city_name.lower() in news_refreshing_cities:
+            return False
+        news_refreshing_cities.add(city_name.lower())
+
+    def _run_refresh():
+        try:
+            fetch_and_store_news(city_name)
+        finally:
+            with news_refresh_lock:
+                news_refreshing_cities.discard(city_name.lower())
+
+    Thread(target=_run_refresh, daemon=True).start()
+    return True
+
+
 def call_forest_officer(event_id=None):
     print("📞 Calling forest officer...")
 
@@ -552,7 +890,7 @@ def trigger_escalation(event_id=None):
 def add_cors_headers(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type"
-    response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     return response
 
 
@@ -738,6 +1076,36 @@ def get_reports():
     return jsonify(report_items)
 
 
+@app.route("/news", methods=["GET"])
+def get_news():
+    city = request.args.get("city", "").strip()
+    target_city = city or load_news_city()
+
+    alerts = fetch_intrusion_news(target_city)
+
+    for alert in alerts:
+        title = alert.get("title", "")
+        if title and title not in sent_alert_titles:
+            send_telegram_intrusion_alert(alert)
+            sent_alert_titles.add(title)
+
+    return jsonify({"city": target_city, "alerts": alerts, "lastUpdated": datetime.now().isoformat()})
+
+
+@app.route("/news/city", methods=["POST"])
+def set_news_city():
+    payload = request.get_json(silent=True) or {}
+    city = str(payload.get("city", "")).strip()
+    if not city:
+        return jsonify({"error": "city is required"}), 400
+
+    saved = save_news_city(city)
+    if not saved:
+        return jsonify({"error": "failed to save city"}), 500
+
+    return jsonify({"city": city})
+
+
 @app.route("/download/<path:report_path>", methods=["GET"])
 def download_report(report_path):
     normalized_path = os.path.normpath(report_path).lstrip(os.sep)
@@ -828,4 +1196,5 @@ def handle_key():
 
 
 if __name__ == "__main__":
+    threading.Thread(target=news_scheduler, daemon=True).start()
     app.run(host="0.0.0.0", port=5000, debug=False)

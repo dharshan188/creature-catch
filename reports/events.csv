@@ -2,3 +2,10 @@ event_id,timestamp,type,confidence,image_path,location,telegram_sent,call_made,u
 EVT-1774631412697,2026-03-27 22:40:12,HUMAN,0.51,alerts/HUMAN_20260327_224012.jpg,Nelambur,True,True,Pending,False,False,reports/report_20260327_224012.pdf
 EVT-1774631593344,2026-03-27 22:43:13,HUMAN,0.6,alerts/HUMAN_20260327_224313.jpg,Nelambur,True,True,Confirmed,True,True,reports/report_20260327_224313.pdf
 EVT-1774631964402,2026-03-27 22:49:24,HUMAN,0.56,alerts/HUMAN_20260327_224924.jpg,Nelambur,True,True,Confirmed,True,True,reports/report_2026-03-27_22-49-24.pdf
+EVT-1774636343582,2026-03-28 00:02:23,HUMAN,0.86,alerts/HUMAN_20260328_000223.jpg,Nelambur,True,True,Pending,False,False,reports/report_2026-03-28_00-02-23.pdf
+EVT-1774636759857,2026-03-28 00:09:19,HUMAN,0.55,alerts/HUMAN_20260328_000919.jpg,Nelambur,True,True,Pending,False,False,reports/report_2026-03-28_00-09-19.pdf
+EVT-1774637019729,2026-03-28 00:13:39,HUMAN,0.52,alerts/HUMAN_20260328_001339.jpg,Nelambur,True,True,Pending,False,False,reports/report_2026-03-28_00-13-39.pdf
+EVT-1774637262953,2026-03-28 00:17:42,HUMAN,0.56,alerts/HUMAN_20260328_001742.jpg,Nelambur,True,True,Pending,False,False,reports/report_2026-03-28_00-17-42.pdf
+EVT-1774640508613,2026-03-28 01:11:48,HUMAN,0.56,alerts/HUMAN_20260328_011148.jpg,Nelambur,True,True,Pending,False,False,reports/report_2026-03-28_01-11-48.pdf
+EVT-1774641336362,2026-03-28 01:25:36,ELEPHANT,0.68,alerts/ELEPHANT_20260328_012536.jpg,Nelambur,True,True,Confirmed,True,True,reports/report_2026-03-28_01-25-36.pdf
+EVT-1774641350271,2026-03-28 01:25:50,HUMAN,0.82,alerts/HUMAN_20260328_012550.jpg,Nelambur,True,True,Pending,False,False,reports/report_2026-03-28_01-25-50.pdf

@@ -3,5 +3,7 @@ ultralytics
 opencv-python
 python-dotenv
 requests
+beautifulsoup4
+feedparser
 twilio
 reportlab
