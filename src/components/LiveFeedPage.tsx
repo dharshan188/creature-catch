@@ -25,6 +25,12 @@ function statusDot(label: string): string {
 export function LiveFeedPage() {
   const [status, setStatus] = useState<DetectionStatus>("none");
   const [statusLabel, setStatusLabel] = useState("Nothing Detected");
+  const [counts, setCounts] = useState({
+    person: 0,
+    elephant: 0,
+    bear: 0,
+    giraffe: 0,
+  });
   const [time, setTime] = useState(new Date());
 
   useEffect(() => {
@@ -35,13 +41,28 @@ export function LiveFeedPage() {
           return;
         }
 
-        const data = (await response.json()) as { status?: string };
+        const data = (await response.json()) as {
+          status?: string;
+          counts?: {
+            person?: number;
+            elephant?: number;
+            bear?: number;
+            giraffe?: number;
+          };
+        };
         const backendStatus = data.status ?? "Nothing Detected";
         setStatusLabel(backendStatus);
         setStatus(mapLabelToStatus(backendStatus));
+        setCounts({
+          person: data.counts?.person ?? 0,
+          elephant: data.counts?.elephant ?? 0,
+          bear: data.counts?.bear ?? 0,
+          giraffe: data.counts?.giraffe ?? 0,
+        });
       } catch {
         setStatusLabel("Nothing Detected");
         setStatus("none");
+        setCounts({ person: 0, elephant: 0, bear: 0, giraffe: 0 });
       }
     };
 
@@ -83,6 +104,13 @@ export function LiveFeedPage() {
         className={`glass rounded-xl px-4 py-2 text-sm font-semibold transition-colors duration-300 ${statusClassName}`}
       >
         {statusDot(statusLabel)} {statusLabel}
+      </div>
+
+      <div className="glass rounded-xl px-4 py-3 text-sm text-foreground">
+        <div>Person: {counts.person}</div>
+        <div>Elephant: {counts.elephant}</div>
+        <div>Bear: {counts.bear}</div>
+        <div>Giraffe: {counts.giraffe}</div>
       </div>
 
       <div className="glass rounded-2xl p-1.5 group max-w-4xl mx-auto">

@@ -93,6 +93,12 @@ ALERT_LABEL_BY_CLASS = {
 }
 
 current_status = "Nothing Detected"
+current_counts = {
+    "person": 0,
+    "elephant": 0,
+    "bear": 0,
+    "giraffe": 0,
+}
 status_lock = Lock()
 alert_lock = Lock()
 tracking_lock = Lock()
@@ -110,7 +116,7 @@ last_label = None
 last_event_id = None
 
 model = YOLO("yolov8n.pt")
-camera = cv2.VideoCapture(2, cv2.CAP_V4L2)
+camera = cv2.VideoCapture(0, cv2.CAP_V4L2)
 camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
 camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
@@ -427,6 +433,13 @@ def generate_report(event):
     content.append(Paragraph("Detection Details:", styles["Heading2"]))
     content.append(Paragraph(f"Type: {event.get('type', 'UNKNOWN')}", styles["Normal"]))
     content.append(Paragraph(f"Confidence: {event.get('confidence', 0.0)}", styles["Normal"]))
+    counts = event.get("counts", {}) or {}
+    content.append(Spacer(1, 8))
+    content.append(Paragraph("Detected Counts:", styles["Heading3"]))
+    content.append(Paragraph(f"Person: {int(counts.get('person', 0))}", styles["Normal"]))
+    content.append(Paragraph(f"Elephant: {int(counts.get('elephant', 0))}", styles["Normal"]))
+    content.append(Paragraph(f"Bear: {int(counts.get('bear', 0))}", styles["Normal"]))
+    content.append(Paragraph(f"Giraffe: {int(counts.get('giraffe', 0))}", styles["Normal"]))
     content.append(Spacer(1, 10))
 
     try:
@@ -485,6 +498,12 @@ def save_event(event_data):
         "event_id": event_data.get("event_id") or f"EVT-{int(time.time() * 1000)}",
         "timestamp": event_data.get("timestamp", current_time_string()),
         "type": event_data.get("type", "UNKNOWN"),
+        "counts": {
+            "person": int((event_data.get("counts") or {}).get("person", 0)),
+            "elephant": int((event_data.get("counts") or {}).get("elephant", 0)),
+            "bear": int((event_data.get("counts") or {}).get("bear", 0)),
+            "giraffe": int((event_data.get("counts") or {}).get("giraffe", 0)),
+        },
         "confidence": event_data.get("confidence", 0.0),
         "image_path": event_data.get("image_path", ""),
         "location": event_data.get("location", LOCATION_NAME),
@@ -640,13 +659,20 @@ ensure_report_storage()
 ensure_news_storage()
 
 
-def send_telegram_alert(image_path, label, conf):
+def send_telegram_alert(image_path, label, conf, counts):
     if not BOT_TOKEN or not CHAT_ID:
         print("Telegram error:", "Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID")
         return False
 
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
-    caption = f"🚨 Intrusion Detected!\nType: {label.upper()}\nConfidence: {conf:.2f}"
+    caption = (
+        "🚨 Intrusion Detected!\n"
+        f"Person: {int(counts.get('person', 0))}\n"
+        f"Elephant: {int(counts.get('elephant', 0))}\n"
+        f"Bear: {int(counts.get('bear', 0))}\n"
+        f"Giraffe: {int(counts.get('giraffe', 0))}\n"
+        f"Confidence: {conf:.2f}"
+    )
     print("📤 API CALL START")
     print("Token:", BOT_TOKEN)
     print("Chat ID:", CHAT_ID)
@@ -895,11 +921,11 @@ def add_cors_headers(response):
 
 
 def generate_frames():
-    global current_status, current_label, first_seen_time, last_confirmed_label, last_detection_time
+    global current_status, current_counts, current_label, first_seen_time, last_confirmed_label, last_detection_time
     global last_image_path, last_label, last_event_id
 
     if not camera.isOpened():
-        raise RuntimeError("Cannot open camera 1")
+        raise RuntimeError("Cannot open camera 0")
 
     while True:
         ok, frame = camera.read()
@@ -911,6 +937,11 @@ def generate_frames():
         frame_status = "Nothing Detected"
         now = time.time()
 
+        person_count = 0
+        elephant_count = 0
+        bear_count = 0
+        giraffe_count = 0
+
         detected_label = None
         detected_confidence = 0.0
         detected_box = None
@@ -919,6 +950,15 @@ def generate_frames():
             class_name = model.names[int(box.cls[0])]
             if class_name not in WATCH_CLASSES:
                 continue
+
+            if class_name == "person":
+                person_count += 1
+            elif class_name == "elephant":
+                elephant_count += 1
+            elif class_name == "bear":
+                bear_count += 1
+            elif class_name == "giraffe":
+                giraffe_count += 1
 
             confidence = float(box.conf[0])
             if confidence > detected_confidence:
@@ -967,6 +1007,11 @@ def generate_frames():
                 2,
             )
 
+            cv2.putText(frame, f"Persons: {person_count}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            cv2.putText(frame, f"Elephants: {elephant_count}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            cv2.putText(frame, f"Bears: {bear_count}", (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            cv2.putText(frame, f"Giraffes: {giraffe_count}", (20, 160), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
         if confirmed_label is not None:
             frame_status = STATUS_BY_CLASS[confirmed_label]
         elif current_label is not None:
@@ -995,6 +1040,12 @@ def generate_frames():
                         {
                             "timestamp": current_time_string(),
                             "type": mapped_label.upper(),
+                            "counts": {
+                                "person": person_count,
+                                "elephant": elephant_count,
+                                "bear": bear_count,
+                                "giraffe": giraffe_count,
+                            },
                             "confidence": round(float(detected_confidence), 2),
                             "image_path": filename,
                             "location": LOCATION_NAME,
@@ -1016,7 +1067,17 @@ def generate_frames():
                     event_id = event_record.get("event_id") if event_record else None
                     last_event_id = event_id
                     print("Sending to Telegram:", filename)
-                    sent_ok = send_telegram_alert(filename, mapped_label, detected_confidence)
+                    sent_ok = send_telegram_alert(
+                        filename,
+                        mapped_label,
+                        detected_confidence,
+                        {
+                            "person": person_count,
+                            "elephant": elephant_count,
+                            "bear": bear_count,
+                            "giraffe": giraffe_count,
+                        },
+                    )
                     if sent_ok and event_id:
                         update_event(event_id, "telegram_sent", True)
                         update_event_timeline(event_id, "telegram", current_time_string())
@@ -1030,7 +1091,19 @@ def generate_frames():
                 print("Alert processing failed:", exc)
 
         with status_lock:
-            current_status = frame_status
+            current_counts = {
+                "person": person_count,
+                "elephant": elephant_count,
+                "bear": bear_count,
+                "giraffe": giraffe_count,
+            }
+            current_status = (
+                f"{frame_status} | "
+                f"Person: {person_count}, "
+                f"Elephant: {elephant_count}, "
+                f"Bear: {bear_count}, "
+                f"Giraffe: {giraffe_count}"
+            )
 
         encoded_ok, buffer = cv2.imencode(".jpg", frame)
         if not encoded_ok:
@@ -1050,7 +1123,17 @@ def video_feed():
 @app.route("/status")
 def status():
     with status_lock:
-        return jsonify({"status": current_status})
+        return jsonify(
+            {
+                "status": current_status,
+                "counts": {
+                    "person": current_counts.get("person", 0),
+                    "elephant": current_counts.get("elephant", 0),
+                    "bear": current_counts.get("bear", 0),
+                    "giraffe": current_counts.get("giraffe", 0),
+                },
+            }
+        )
 
 
 @app.route("/reports", methods=["GET"])
@@ -1067,6 +1150,7 @@ def get_reports():
             {
                 "timestamp": event.get("timestamp"),
                 "type": event.get("type"),
+                "counts": event.get("counts", {}),
                 "confidence": float(event.get("confidence", 0.0)),
                 "user_response": event.get("user_response", "Pending"),
                 "report_path": report_path,

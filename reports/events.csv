@@ -12,3 +12,6 @@ EVT-1774641350271,2026-03-28 01:25:50,HUMAN,0.82,alerts/HUMAN_20260328_012550.jp
 EVT-1774681350526,2026-03-28 12:32:30,HUMAN,0.82,alerts/HUMAN_20260328_123230.jpg,Nelambur,True,True,Confirmed,True,True,reports/report_2026-03-28_12-32-30.pdf
 EVT-1774681457015,2026-03-28 12:34:17,ELEPHANT,0.82,alerts/ELEPHANT_20260328_123417.jpg,Nelambur,True,False,Pending,False,False,reports/report_2026-03-28_12-34-17.pdf
 EVT-1774681469587,2026-03-28 12:34:29,HUMAN,0.59,alerts/HUMAN_20260328_123429.jpg,Nelambur,False,False,Pending,False,False,reports/report_2026-03-28_12-34-29.pdf
+EVT-1774684405292,2026-03-28 13:23:25,HUMAN,0.93,alerts/HUMAN_20260328_132325.jpg,Nelambur,False,False,Pending,False,False,reports/report_2026-03-28_13-23-25.pdf
+EVT-1774684699573,2026-03-28 13:28:19,HUMAN,0.89,alerts/HUMAN_20260328_132819.jpg,Nelambur,True,False,Pending,False,False,reports/report_2026-03-28_13-28-19.pdf
+EVT-1774685220793,2026-03-28 13:37:00,HUMAN,0.64,alerts/HUMAN_20260328_133700.jpg,Nelambur,True,True,Pending,False,False,reports/report_2026-03-28_13-37-00.pdf

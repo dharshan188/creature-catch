@@ -268,5 +268,89 @@
       "forest": ""
     },
     "report_file": "reports/report_2026-03-28_12-34-29.pdf"
+  },
+  {
+    "event_id": "EVT-1774684405292",
+    "timestamp": "2026-03-28 13:23:25",
+    "type": "HUMAN",
+    "counts": {
+      "person": 1,
+      "elephant": 0,
+      "bear": 0,
+      "giraffe": 0
+    },
+    "confidence": 0.93,
+    "image_path": "alerts/HUMAN_20260328_132325.jpg",
+    "location": "Nelambur",
+    "telegram_sent": false,
+    "call_made": false,
+    "user_response": "Pending",
+    "email_sent": false,
+    "forest_notified": false,
+    "timeline": {
+      "detected": "2026-03-28 13:23:25",
+      "telegram": "",
+      "call": "",
+      "user_response": "",
+      "email": "",
+      "forest": ""
+    },
+    "report_file": "reports/report_2026-03-28_13-23-25.pdf"
+  },
+  {
+    "event_id": "EVT-1774684699573",
+    "timestamp": "2026-03-28 13:28:19",
+    "type": "HUMAN",
+    "counts": {
+      "person": 1,
+      "elephant": 0,
+      "bear": 0,
+      "giraffe": 0
+    },
+    "confidence": 0.89,
+    "image_path": "alerts/HUMAN_20260328_132819.jpg",
+    "location": "Nelambur",
+    "telegram_sent": true,
+    "call_made": false,
+    "user_response": "Pending",
+    "email_sent": false,
+    "forest_notified": false,
+    "timeline": {
+      "detected": "2026-03-28 13:28:19",
+      "telegram": "2026-03-28 13:28:32",
+      "call": "",
+      "user_response": "",
+      "email": "",
+      "forest": ""
+    },
+    "report_file": "reports/report_2026-03-28_13-28-19.pdf"
+  },
+  {
+    "event_id": "EVT-1774685220793",
+    "timestamp": "2026-03-28 13:37:00",
+    "type": "HUMAN",
+    "counts": {
+      "person": 1,
+      "elephant": 0,
+      "bear": 0,
+      "giraffe": 0
+    },
+    "confidence": 0.64,
+    "image_path": "alerts/HUMAN_20260328_133700.jpg",
+    "location": "Nelambur",
+    "telegram_sent": true,
+    "call_made": true,
+    "user_response": "Pending",
+    "email_sent": false,
+    "forest_notified": false,
+    "timeline": {
+      "detected": "2026-03-28 13:37:00",
+      "telegram": "2026-03-28 13:37:08",
+      "call": "2026-03-28 13:37:22",
+      "user_response": "",
+      "email": "",
+      "forest": ""
+    },
+    "report_file": "reports/report_2026-03-28_13-37-00.pdf"
   }
 ]
