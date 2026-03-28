@@ -110,7 +110,7 @@ last_label = None
 last_event_id = None
 
 model = YOLO("yolov8n.pt")
-camera = cv2.VideoCapture(0, cv2.CAP_V4L2)
+camera = cv2.VideoCapture(2, cv2.CAP_V4L2)
 camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
 camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
@@ -899,7 +899,7 @@ def generate_frames():
     global last_image_path, last_label, last_event_id
 
     if not camera.isOpened():
-        raise RuntimeError("Cannot open camera 0")
+        raise RuntimeError("Cannot open camera 1")
 
     while True:
         ok, frame = camera.read()

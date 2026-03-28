@@ -9,3 +9,6 @@ EVT-1774637262953,2026-03-28 00:17:42,HUMAN,0.56,alerts/HUMAN_20260328_001742.jp
 EVT-1774640508613,2026-03-28 01:11:48,HUMAN,0.56,alerts/HUMAN_20260328_011148.jpg,Nelambur,True,True,Pending,False,False,reports/report_2026-03-28_01-11-48.pdf
 EVT-1774641336362,2026-03-28 01:25:36,ELEPHANT,0.68,alerts/ELEPHANT_20260328_012536.jpg,Nelambur,True,True,Confirmed,True,True,reports/report_2026-03-28_01-25-36.pdf
 EVT-1774641350271,2026-03-28 01:25:50,HUMAN,0.82,alerts/HUMAN_20260328_012550.jpg,Nelambur,True,True,Pending,False,False,reports/report_2026-03-28_01-25-50.pdf
+EVT-1774681350526,2026-03-28 12:32:30,HUMAN,0.82,alerts/HUMAN_20260328_123230.jpg,Nelambur,True,True,Confirmed,True,True,reports/report_2026-03-28_12-32-30.pdf
+EVT-1774681457015,2026-03-28 12:34:17,ELEPHANT,0.82,alerts/ELEPHANT_20260328_123417.jpg,Nelambur,True,False,Pending,False,False,reports/report_2026-03-28_12-34-17.pdf
+EVT-1774681469587,2026-03-28 12:34:29,HUMAN,0.59,alerts/HUMAN_20260328_123429.jpg,Nelambur,False,False,Pending,False,False,reports/report_2026-03-28_12-34-29.pdf

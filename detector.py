@@ -11,7 +11,7 @@ except ImportError:
 
 # ── Configuration ─────────────────────────────────────────────
 CONF_THRESHOLD = 0.5
-CAMERA_INDEX   = 0
+CAMERA_INDEX   = 2
 
 # 🔥 UPDATED CLASSES
 WATCH_CLASSES = {"person", "elephant", "bear", "giraffe"}
